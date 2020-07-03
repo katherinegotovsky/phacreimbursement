@@ -1,0 +1,967 @@
+Attribute VB_Name = "PHACReimbursements"
+
+'**************
+'PURPOSE: Run everything
+'MODS NEEDED: If we are continuing to use the HR Table, those functions must be added back
+'             into this module.
+'**************
+
+Sub CallEverything()
+    Call PullDownAccountNames
+    Call DeleteRowsAboveExpenses
+    Call AddNameMemoColumn
+    Call DeleteEmptyRows
+    Call MakeAccountsPivot
+    Call CleanTimeActivities
+    Call CreatePivotTimeAct
+    Call SetUpHoursTable
+    Call CalculateHoursTable
+    Call CalculatePHACPercentage
+    Call WriteJobsToSheet
+    Call AddRemoveEmployees
+    'Call AddCustomPercents
+    'Call FormatAccounts
+    'Call AddBordersAccounts
+    'Call CopyHoursTable
+    
+End Sub
+
+'**************
+'PURPOSE: Function that tests whether the correct worksheet is being used.
+'MODS NEEDED: None.
+'NOTES: Do not run this; it is a function.
+'**************
+
+Function IsWorksheet(ByVal WorksheetName As String) As Boolean
+
+    If (Not (ActiveSheet.name = WorksheetName) And WorksheetExists(WorksheetName)) Then
+        Worksheets(WorksheetName).Select
+    End If
+
+End Function
+
+'**************
+'PURPOSE: Function that tests whether all of the needed worksheets are in the workbook.
+'MODS NEEDED: None.
+'NOTES: Do not run this; it is a function.
+'**************
+
+Function WorksheetExists(ByVal WorksheetName As String) As Boolean
+
+    Flag = 0
+    count = ActiveWorkbook.Worksheets.count
+
+    For i = 1 To count
+        WS_NAME = ActiveWorkbook.Worksheets(i).name
+        If WS_NAME = WorksheetName Then Flag = 1
+    Next i
+     
+    If Flag = 1 Then
+        WorksheetExists = True
+    Else
+        WorksheetExists = False
+    End If
+        
+End Function
+
+'**************
+'PURPOSE: Checks that all required sheets are in the workbook.
+'MODS NEEDED: None, unless new worksheets are required.
+'**************
+
+Sub CheckforSheets()
+
+    If WorksheetExists("Transaction Detail by Account") Then
+    Else
+        MsgBox "Please add the Transaction Detail by Account sheet to this workbook"
+        End
+    End If
+    
+    If WorksheetExists("Time Activities by Employee Det") Then
+    Else
+        MsgBox "Please add the Time Activities by Employee Det sheet to this workbook"
+        End
+    End If
+
+End Sub
+
+
+'**************
+'PURPOSE: Copies and pastes the correct account name into the first column of each transaction.
+'         This will allow us to create pivot tables later on.
+'MODS NEEDED: Change the reference to "A5" if the header format changes.
+'**************
+
+Sub PullDownAccountNames()
+
+    'Switches to the Transaction Detail by Account worksheet
+    Worksheets("Transaction Detail by Account").Activate
+    IsWorksheet ("Transaction Detail by Account")
+    
+    'Adds name to the top of "Account" column -- so that we can use it as a field in the pivot table
+    Range("A5").Value = "Account"
+    
+    ' Calculate last row
+    Dim LastRow As Integer
+    LastRow = Cells(rows.count, "A").End(xlUp).Row
+    
+    ' Trim the values
+    For i = 2 To LastRow
+        Cells(i, 1).Value = Trim(Cells(i, 1).Value)
+    Next i
+    
+    'Copies and pastes the correct account name into the first column of each transaction
+    For Each area In Columns("A:A").SpecialCells(xlCellTypeBlanks)
+            If area.Cells.Row <= ActiveSheet.UsedRange.rows.count Then
+                area.Cells = Range(area.Address).Offset(-1, 0).Value
+            End If
+    Next area
+    
+
+End Sub
+
+'**************
+'PURPOSE: Deletes any of the transactions that are not expenses or costs (i.e. revenue, sponsorships, etc.)
+'MODS NEEDED: Change "What:=" in the "Set fRg ..." line, if "Marketing and Promotion" is no longer the first expense.
+'             Change the reference to "A6" if that is no longer the first line after header.
+'**************
+
+Sub DeleteRowsAboveExpenses()
+
+    Worksheets("Transaction Detail by Account").Activate
+    
+    Range("H:H").Delete
+
+    'Defining the range to be deleted.
+    'Marketing and Promotion is the first expense, so everything between it and the header will be deleted.
+    Dim fRg As Range
+    Set fRg = Cells.Find(What:="MARKETING AND PROMOTION", LookAt:=xlWhole)
+     
+    'This does the actual deleting, producing error messages if the sheet is not set up correctly.
+    If Not fRg Is Nothing Then
+        If fRg.Row <> 1 Then
+            Range("A6", fRg.Offset(-1)).EntireRow.Delete
+        End If
+    Else
+       'DeleteRowsAboveExpenses ("OFFICE AND ADMINISTRATION COSTS")
+    End If
+
+End Sub
+
+'**************
+'PURPOSE: This concatenates the "name" and "memo" columns into a new column
+'MODS NEEDED: Change the ActiveCell.Formula if the columns change (i.e. F and H).
+'             Change the reference to "B7" if that is no longer the first cell.
+'**************
+
+Sub AddNameMemoColumn()
+
+    IsWorksheet ("Transaction Detail by Account")
+
+    'inserts new column
+    Range("B:B").Insert
+    Range("B7").Select
+
+    'inserts formula in new column
+    ActiveCell.Formula = "=F7 & "" "" & H7"
+
+    ' Calculates last row
+    Dim LastRow As Long
+    LastRow = Cells(rows.count, "A").End(xlUp).Row
+    
+    ' Removes strange line at the end
+    Cells(LastRow, 1).UnMerge
+    Cells(LastRow, 1).ClearContents
+    
+    ' Fills down formula to the last row
+    Range("B7").Select
+    Selection.AutoFill Destination:=Range("B7:B" & LastRow), Type:=xlFillDefault
+    Range("B5").Value = "NameMemo"
+    
+    
+End Sub
+
+'**************
+'PURPOSE: Deletes irrelevant rows in the Transaction Detail by Account sheet.
+'MODS NEEDED: Change the "C" in Columns("C") if that is no longer the "Date" column.
+'             (All transactions have dates)
+'**************
+
+Sub DeleteEmptyRows()
+    
+    IsWorksheet ("Transaction Detail by Account")
+    Columns("C").SpecialCells(xlBlanks).EntireRow.Delete
+    
+End Sub
+
+'**************
+'PURPOSE: Makes a pivot sheet called "Accounts".
+'MODS NEEDED: Change the pivot table's selected fields if their names change.
+'**************
+
+Sub MakeAccountsPivot()
+
+    IsWorksheet ("Transaction Detail by Account")
+    
+    'Makes a new sheet called "Accounts"
+    Selection.End(xlDown).Select
+    Sheets.Add.name = "Accounts"
+
+    'Selects the whole sheet of Transaction Detail by Account and sets up the pivot table on Accounts.
+    'The Pivot Time Activities name is PivotTable 9
+    ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:= _
+    "Transaction Detail by Account!" & Sheets("Transaction Detail by Account").Range("A1").CurrentRegion.Address(ReferenceStyle:=xlR1C1), Version:=6).CreatePivotTable _
+    TableDestination:="Accounts!R3C1", TableName:="PivotTable9", DefaultVersion _
+    :=6
+    
+    'Creates a pivot table with the fields Account, NameMemo, and Sum of Amount selected
+    Sheets("Accounts").Select
+    Cells(3, 1).Select
+    With ActiveSheet.PivotTables("PivotTable9")
+        .ColumnGrand = True
+        .HasAutoFormat = True
+        .DisplayErrorString = False
+        .DisplayNullString = True
+        .EnableDrilldown = True
+        .ErrorString = ""
+        .MergeLabels = False
+        .NullString = ""
+        .PageFieldOrder = 2
+        .PageFieldWrapCount = 0
+        .PreserveFormatting = True
+        .RowGrand = True
+        .SaveData = True
+        .PrintTitles = False
+        .RepeatItemsOnEachPrintedPage = True
+        .TotalsAnnotation = False
+        .CompactRowIndent = 1
+        .InGridDropZones = False
+        .DisplayFieldCaptions = True
+        .DisplayMemberPropertyTooltips = False
+        .DisplayContextTooltips = True
+        .ShowDrillIndicators = True
+        .PrintDrillIndicators = False
+        .AllowMultipleFilters = False
+        .SortUsingCustomLists = True
+        .FieldListSortAscending = False
+        .ShowValuesRow = False
+        .CalculatedMembersInFilters = False
+        .RowAxisLayout xlCompactRow
+    End With
+    With ActiveSheet.PivotTables("PivotTable9").PivotCache
+        .RefreshOnFileOpen = False
+        .MissingItemsLimit = xlMissingItemsDefault
+    End With
+    ActiveSheet.PivotTables("PivotTable9").RepeatAllLabels xlRepeatLabels
+    With ActiveSheet.PivotTables("PivotTable9").PivotFields("Account")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+    With ActiveSheet.PivotTables("PivotTable9").PivotFields("NameMemo")
+        .Orientation = xlRowField
+        .Position = 2
+    End With
+    ActiveSheet.PivotTables("PivotTable9").AddDataField ActiveSheet.PivotTables( _
+        "PivotTable9").PivotFields("Amount"), "Sum of Amount", xlSum
+        
+End Sub
+
+'**************
+'PURPOSE: Cleans up the Time Activities by Employee Det Sheet in a similar way to the Transaction Detail by Account sheet.
+'MODS NEEDED: Change reference to "A5" if that is no longer the top of the column.
+'             Change reference to B column if that is no longer the one with dates.
+'**************
+
+Sub CleanTimeActivities()
+
+    Worksheets("Time Activities by Employee Det").Activate
+    IsWorksheet ("Time Activities by Employee Det")
+
+    'Adds title to the A column so we can make pivot table later
+    Range("A5").Value = "Employee"
+    
+    ' Adds the correct employee to the first cell of each row in the sheet
+    For Each area In Columns("A:A").SpecialCells(xlCellTypeBlanks)
+            If area.Cells.Row <= ActiveSheet.UsedRange.rows.count Then
+                area.Cells = Range(area.Address).Offset(-1, 0).Value
+            End If
+    Next area
+    
+    'Delete unneccessary rows with blanks based on "Date" column
+    '(All entries have dates)
+    Columns("B").SpecialCells(xlBlanks).EntireRow.Delete
+
+End Sub
+
+    
+'**************
+'PURPOSE: Creates a pivot table
+'MODS NEEDED: Change the pivot fields if needed
+'**************
+    
+Sub CreatePivotTimeAct()
+
+    IsWorksheet ("Time Activities by Employee Det")
+
+    'Adds sheet called "Pivot Time Activities"
+    Sheets.Add.name = "Pivot Time Activities"
+    
+    'Selects all of the data in "Time Activities by Employee Det and makes a pivot table in "Pivot Time Activities" called PivotTable11
+    ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:= _
+    "Time Activities by Employee Det!" & Sheets("Time Activities by Employee Det").Range("A1").CurrentRegion.Address(ReferenceStyle:=xlR1C1), Version:=6).CreatePivotTable _
+    TableDestination:="'Pivot Time Activities'!R3C1", TableName:="PivotTable11", DefaultVersion _
+    :=6
+
+    'Makes a pivot table with fields Employee, Donor, and Duration
+    Sheets("Pivot Time Activities").Select
+    Cells(3, 1).Select
+    With ActiveSheet.PivotTables("PivotTable11")
+        .ColumnGrand = True
+        .HasAutoFormat = True
+        .DisplayErrorString = False
+        .DisplayNullString = True
+        .EnableDrilldown = True
+        .ErrorString = ""
+        .MergeLabels = False
+        .NullString = ""
+        .PageFieldOrder = 2
+        .PageFieldWrapCount = 0
+        .PreserveFormatting = True
+        .RowGrand = True
+        .SaveData = True
+        .PrintTitles = False
+        .RepeatItemsOnEachPrintedPage = True
+        .TotalsAnnotation = False
+        .CompactRowIndent = 1
+        .InGridDropZones = False
+        .DisplayFieldCaptions = True
+        .DisplayMemberPropertyTooltips = False
+        .DisplayContextTooltips = True
+        .ShowDrillIndicators = True
+        .PrintDrillIndicators = False
+        .AllowMultipleFilters = False
+        .SortUsingCustomLists = True
+        .FieldListSortAscending = False
+        .ShowValuesRow = False
+        .CalculatedMembersInFilters = False
+        .RowAxisLayout xlCompactRow
+    End With
+    With ActiveSheet.PivotTables("PivotTable11").PivotCache
+        .RefreshOnFileOpen = False
+        .MissingItemsLimit = xlMissingItemsDefault
+    End With
+    ActiveSheet.PivotTables("PivotTable11").RepeatAllLabels xlRepeatLabels
+    With ActiveSheet.PivotTables("PivotTable11").PivotFields("Employee")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+    With ActiveSheet.PivotTables("PivotTable11").PivotFields("Donor")
+        .Orientation = xlRowField
+        .Position = 2
+    End With
+    ActiveSheet.PivotTables("PivotTable11").AddDataField ActiveSheet.PivotTables( _
+        "PivotTable11").PivotFields("Duration"), "Sum of Duration", xlSum
+
+End Sub
+
+'**************
+'PURPOSE: Creates a table in Pivot Time Activities that will be used for time calculations.
+'MODS NEEDED: Changes need to be made if you are adding a new column. See instructions.
+'**************
+
+Sub SetUpHoursTable()
+
+    IsWorksheet ("Pivot Time Activities")
+    
+    'Sets up the table with the correct column titles
+    Range("G3").Activate
+    ActiveCell.Value = "Employee"
+    ActiveCell.Offset(0, 1).Select
+    ActiveCell.Value = "% of hours on PHAC"
+    ActiveCell.Offset(0, 1).Select
+    ActiveCell.Value = "# of hours on PHAC"
+    ActiveCell.Offset(0, 1).Select
+    ActiveCell.Value = "Total # of hours"
+    
+    
+'    *********** To add a new column *****************:
+'    ActiveCell.Offset(0, 1).Select
+'    ActiveCell.Value = "Name"
+    
+    ActiveCell.Offset(1, -3).Select ' ****** decrement the "y" value for each new column you have added
+    
+    'Create variables for LEAP's total PHAC hours and total hours worked
+    Dim totalPHAC As Double
+    Dim totalhours As Double
+
+End Sub
+
+'**************
+'PURPOSE: Adds calculations to the PHAC hours table.
+'MODS NEEDED: Changes need to be made if you are adding a new column. See instructions.
+'             Change references to A:B in the formulas if the pivot table is in other columns.
+'**************
+
+Sub CalculateHoursTable()
+    
+    IsWorksheet ("Pivot Time Activities")
+    
+    'Loops through each employee in the pivot table
+    For Each Pi In ActiveSheet.PivotTables("PivotTable11").PivotFields("Employee").PivotItems
+        
+        'Adds employee name to the table and then moves active cell to the right
+        ActiveCell.Value = Pi.name
+        ActiveCell.Offset(0, 1).Select
+    
+        ' Calculates the time percentage on PHAC of the current employee
+        ActiveCell.Formula = _
+            "=GETPIVOTDATA(""Duration"", A:B ,""Employee"",""" & Pi.name & """,""Donor"",""PHAC"") /GETPIVOTDATA(""Duration"",A:B,""Employee"",""" & Pi.name & """) * 100"
+        
+        'Error checking
+        If IsError(ActiveCell.Value) Then
+            ActiveCell.Value = 0
+        Else
+            Dim PT As PivotTable
+            Set PT = ActiveSheet.PivotTables(1)
+            
+            ' Add this employee's hours to total PHAC hours and total hours worked by all LEAP employees
+            totalPHAC = totalPHAC + PT.GetPivotData("Duration", "Employee", "" & Pi.name & "", "Donor", "PHAC").Value
+            totalhours = totalhours + PT.GetPivotData("Duration", "Employee", "" & Pi.name & "").Value
+            
+        End If
+        
+        ' Moves active cell to the right
+        ActiveCell.Offset(0, 1).Select
+        
+        ' Adds the # of hours worked on PHAC by the current employee
+        ActiveCell.Formula = _
+            "=GETPIVOTDATA(""Duration"",A:B,""Employee"",""" & Pi.name & """,""Donor"",""PHAC"")"
+        
+        ' Error checking
+        If IsError(ActiveCell.Value) Then
+            ActiveCell.Value = 0
+        End If
+        
+        ' Moves active cell to the right
+        ActiveCell.Offset(0, 1).Select
+        
+        ' Adds the # of hours worked in total by the current employee
+        ActiveCell.Formula = _
+            "=GETPIVOTDATA(""Duration"",A:B,""Employee"",""" & Pi.name & """)"
+            
+            
+            
+        '    *********** To add a new column *****************:
+        '    ActiveCell.Offset(0, 1).Select
+        '    ActiveCell.Formula = " = FORMULA(______)"
+        
+            
+        ' Moves active cell to the first column of the next row
+        ActiveCell.Offset(1, -3).Select ' ****** decrement the "y" value for each new column you have added
+    
+    Next Pi
+    
+    ' Add totals to the bottom
+    ActiveCell.Value = "Total PHAC Hours"
+    ActiveCell.Offset(0, 1).Select
+    ActiveCell.Value = totalPHAC / totalhours * 100
+    ActiveCell.Offset(0, 1).Select
+    ActiveCell.Value = totalPHAC
+    ActiveCell.Offset(0, 1).Select
+    ActiveCell.Value = totalhours
+
+End Sub
+
+'**************
+'PURPOSE: Applies percentages to the expenses.
+'MODS NEEDED:
+'**************
+
+Sub CalculatePHACPercentage()
+
+    ' Switch to "Accounts" worksheet
+    Worksheets("Accounts").Activate
+    IsWorksheet ("Accounts")
+
+    ' Pull PHAC Percentage from the other sheet
+    Range("B2").Select
+    ActiveCell.FormulaR1C1 = "PHAC Percentage"
+    Range("C2").Select
+    ActiveCell.Formula = "=(VLOOKUP(""Total PHAC Hours"", 'Pivot Time Activities'!G:H, 2, FALSE) / 100)"
+    
+    ' Add titles to the sheet
+    Range("C3").Select
+    ActiveCell.FormulaR1C1 = "Percentage"
+    Range("D3").Select
+    ActiveCell.FormulaR1C1 = "PHAC amount"
+    Range("E3").Select
+    ActiveCell.FormulaR1C1 = "Non-PHAC amount"
+    Range("F3").Select
+    ActiveCell.FormulaR1C1 = "Checklist"
+    
+    ' Calculate last row
+    Dim LastRow As Long
+    LastRow = Cells(rows.count, "B").End(xlUp).Row
+    
+    ' Copy and paste percentage down the column
+    Range("C4").Select
+    ActiveCell.Value = "=$C$2"
+    Range("C4").Select
+    Selection.AutoFill Destination:=Range("C4:C" & LastRow)
+    
+    ' Calculate PHAC amount
+    Range("D4").Select
+    ActiveCell.Formula = "=CONCATENATE(B4)*C4"
+    Range("D4").Select
+    Selection.AutoFill Destination:=Range("D4:D" & LastRow)
+
+    ' Calculate non-PHAC amount
+    Range("E4").Select
+    ActiveCell.Formula = "=CONCATENATE(B4)*(1-C4)"
+    Range("E4").Select
+    Selection.AutoFill Destination:=Range("E4:E" & LastRow)
+
+End Sub
+
+'**************
+'PURPOSE: Obtains the Parent of the current PivotField (i.e. employee to donor)
+'MODS NEEDED: none
+'NOTES: Don't run this; it's a function
+'**************
+
+Function PivotFieldParent(rngInput As Range) As String
+
+    'Defining variables to make them easier to type
+    Dim PC As PivotCell
+    Dim pf As PivotField
+    Dim PT As PivotTable
+    Dim strOut As String
+     
+    'Error Handling and setting Pivot Cell
+    On Error Resume Next
+    Set PC = rngInput.PivotCell
+    On Error GoTo err_handle
+     
+    'Checking that PC is not Nothing
+    If PC Is Nothing Then
+        strOut = "Not a pivot cell"
+    Else
+    
+        'If the cell is a Pivot Item....
+        If PC.PivotCellType = xlPivotCellPivotItem Then
+            Set PT = PC.PivotTable
+            Set pf = PC.PivotField
+        
+            'If the Pivot Item is a sub-field of a row, get the name of its row
+            If pf.Position > 1 Then
+                If pf.Orientation = xlRowField Then
+                Set PC = Intersect(rngInput.EntireRow, PT.DataBodyRange).Cells(1).PivotCell
+                strOut = PC.RowItems(pf.Position - 1).Value
+            ElseIf pf.Orientation = xlColumnField Then
+                Set PC = Intersect(rngInput.EntireColumn, PT.DataBodyRange).Cells(1).PivotCell
+                strOut = PC.ColumnItems(pf.Position - 1).Value
+            End If
+            End If
+        End If
+     End If
+     
+     'Output the name of the row
+     PivotFieldParent = strOut
+     
+     Exit Function
+
+err_handle:
+    PivotFieldParent = "Unknown error"
+    
+End Function
+
+'**************
+'PURPOSE: Creates a list of positions within the center with a hidden worksheet.
+'MODS NEEDED: Every time a new position is added or one is removed, this worksheet changes. A function has been written
+'             to do this in a user-friendly way (no need to edit the list itself here).
+'NOTES: Not sure how to program this so that it doesn't add a new worksheet if one has been created in the past.
+'**************
+
+Sub WriteJobsToSheet()
+
+    'Don't run if worksheet exists. Find some way of searching the whole computer.
+    If WorksheetExists("JobsValuesWorksheet") Then
+    
+        
+    Else
+        
+        Dim OldSheet As Worksheet
+        Set OldSheet = ActiveSheet
+        
+        'Add a new worksheet that is hidden
+        Sheets.Add.name = "JobsValuesWorksheet"
+        Set ws = Worksheets("JobsValuesWorksheet")
+        ws.Visible = True
+        
+        'Put values in worksheet
+        ws.Range("A1").Value = "ED/MD"
+        ws.Range("A2").Value = "Portfolio Director"
+        ws.Range("A3").Value = "Portfolio Analyst"
+        ws.Range("A4").Value = "Director of Operations"
+        ws.Range("A5").Value = "Associate"
+        ws.Range("A6").Value = "Partnership Director"
+        ws.Range("A7").Value = "Secondment Fees"
+        ws.Range("A8").Value = "Interns"
+        
+        'Re-activate the sheet we were on before
+        OldSheet.Activate
+    End If
+
+End Sub
+
+'**************
+'PURPOSE: Ensure that all jobs have been accounted for. If they haven't been, add or remove the jobs that are different.
+'         This function modifies the jobs worksheet.
+'MODS NEEDED:
+'**************
+
+Sub AddRemoveEmployees()
+
+    Worksheets("JobsValuesWorksheet").Select
+
+    'Calculate rows in the sheet and add positions to a message that we will output later.
+    Dim rows As Integer
+    For Each r In Intersect(Range("A:A"), Worksheets("JobsValuesWorksheet").UsedRange)
+        If r.Value <> "" Then
+            msg = msg & vbCrLf & r.Value
+            rows = rows + 1
+        End If
+    Next r
+    
+    
+    'Do this and loop continuously until the answer is no
+    Do
+    
+        'Output a message with the jobs that are currently accounted for
+        result = MsgBox("These are the employees you have listed:" & msg & vbCrLf & "Would you like to add an employee?", vbYesNo, "Add/Remove Employees")
+    
+        If result = vbNo Then
+        
+        Else
+            
+            'Asks what position should be added
+            Dim positionValue As Variant
+            positionValue = InputBox("Please enter the position you would like to add")
+            
+            'Writes the new position to the worksheet and increments "rows"
+            Worksheets("JobsValuesWorksheet").Range("A" & rows).Value = positionValue
+            rows = rows + 1
+            msg = msg & vbCrLf & positionValue
+        End If
+            
+    Loop While result = vbYes
+    
+    'Do this and loop continuously until the answer is no
+    Do
+    
+        'Output a message with the jobs that are currently accounted for
+        result = MsgBox("These are the employees you have listed:" & msg & vbCrLf & "Would you like to remove an employee?", vbYesNo, "Add/Remove Employees")
+    
+        If result = vbNo Then
+        
+        Else
+        
+            'Asks what position should be removed
+            positionValue = InputBox("Please enter the position you would like to remove: ")
+            
+            'Removes the row with the position from the worksheet, shifts cells up and decrements "rows"
+            For Each r In Intersect(Range("A:A"), Worksheets("JobsValuesWorksheet").UsedRange)
+                If r.Value = positionValue Then
+                    Range("A" & r.Row).Delete Shift:=xlUp
+                    rows = rows - 1
+                    msg = Replace(msg, positionValue, "", 1, 1)
+                End If
+            Next r
+        End If
+            
+    Loop While result = vbYes
+
+
+End Sub
+
+'**************
+'PURPOSE: Outputs a boolean value indicating whether or not a string is in the JobsValuesWorksheet.
+'MODS NEEDED:
+'**************
+
+Function IsInWorksheet(ByVal stringToBeFound As String) As Boolean
+    Worksheets("JobsValuesWorksheet").Select
+    For Each r In Intersect(Range("A:A"), Worksheets("JobsValuesWorksheet").UsedRange)
+            If r.Value = stringToBeFound Then
+                IsInWorksheet = True
+                Exit Function
+            End If
+    Next r
+    IsInWorksheet = False
+
+End Function
+
+
+'**************
+'PURPOSE: Overrides automatic percentage with customized percentages.
+'MODS NEEDED: Might need to add new expense categories.
+'**************
+
+Sub AddCustomPercents()
+
+    Worksheets("Accounts").Select
+    IsWorksheet ("Accounts")
+
+    'Calculate the last row
+    Dim LastRow As Long
+    LastRow = Cells(rows.count, "A").End(xlUp).Row
+
+    
+    Dim rwIndex As Integer
+    Dim colIndex As Integer
+    Dim count As Integer
+    colIndex = 1
+    For rwIndex = 3 To LastRow
+            
+            'The below is brute force code. I apologize. -KG :)
+
+            'For each cell value that is in the JobsValuesWorksheet, toggle the position and move it to the top
+            If (IsInWorksheet(Cells(rwIndex, colIndex).Value)) Then
+                Worksheets("Accounts").Select
+                ActiveSheet.PivotTables("PivotTable9").PivotFields("Account").PivotItems( _
+                Cells(rwIndex, colIndex).Value).ShowDetail = False
+                ActiveSheet.PivotTables("PivotTable9").PivotFields("Account").PivotItems( _
+                Cells(rwIndex, colIndex).Value).Position = 1
+                count = count + 1
+
+                'Clear the values that are adjacent to the positions, as they are incorrect and will be calculated separately
+                Cells(3 + count, colIndex + 2).Clear
+                Cells(3 + count, colIndex + 3).Clear
+                
+                'Insert formula for product of percentage and value
+                Worksheets("Accounts").Range("D" & (count + 3)).Formula = _
+                "= B" & (count + 3) & " * C" & (count + 3)
+                                
+                'Insert formula for product of percentage and value
+                Range("E" & (count + 3)).Formula = _
+                "= B" & (count + 3) & " * (1- C" & (count + 3) & ")"
+                
+            End If
+            Worksheets("Accounts").Activate
+    Next rwIndex
+    
+    Worksheets("Accounts").Activate
+    'Go through each row of the first column
+    For rwIndex = 3 To LastRow
+    
+                ' These expense categories are always different. Highlight them and
+                ' change them to 0 so that Cheryl can easily spot and correct
+                If (PivotFieldParent(Cells(rwIndex, colIndex)) = "Benefits") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Consulting") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Telephone/Wireless") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Gifts Expense") Then
+                    Cells(rwIndex, colIndex + 2).Activate
+                    Cells(rwIndex, colIndex + 2).Value = 0
+                        With Selection.Interior
+                        .Pattern = xlSolid
+                        .PatternColorIndex = xlAutomatic
+                        .Color = 65535
+                        .TintAndShade = 0
+                        .PatternTintAndShade = 0
+                    End With
+                    
+                ' These expense categories are always 1 or 0. Change them to 1 to make it easy for Cheryl
+                ElseIf (PivotFieldParent(Cells(rwIndex, colIndex)) = "Graphic Design") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Meals and entertainment") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Office Supplies") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Printed Material") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Postage/Courier") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "TRAVEL") Or _
+                (PivotFieldParent(Cells(rwIndex, colIndex)) = "Parking & Local Transportation") Then
+                    Cells(rwIndex, colIndex + 2).Activate
+                    Cells(rwIndex, colIndex + 2).Value = 1
+                        With Selection.Interior
+                        .Pattern = xlSolid
+                        .PatternColorIndex = xlAutomatic
+                        .Color = 65535
+                        .TintAndShade = 0
+                        .PatternTintAndShade = 0
+                    End With
+                    
+                 End If
+                    
+                ' remove #VALUE!
+                If (IsError(Cells(rwIndex, colIndex))) Then
+                    Cells(rwIndex, colIndex).Clear
+                End If
+
+    Next rwIndex
+End Sub
+
+'**************
+'PURPOSE: Formatting for the worksheet.
+'MODS NEEDED:
+'**************
+
+Sub FormatAccounts()
+
+    Worksheets("Accounts").Activate
+    IsWorksheet ("Accounts")
+
+    'Change the column widths
+    Columns("A:A").ColumnWidth = 90.86
+    Columns("B:B").ColumnWidth = 21
+    Columns("I:I").ColumnWidth = 18.86
+    
+    'Make certain cells bold
+    Range("B2").Select
+    Selection.Font.Bold = True
+    Range("C3:F3").Select
+    Selection.Font.Bold = True
+    Range("I3:M3").Select
+    Selection.Font.Bold = True
+    Range("I13:L13").Select
+    Selection.Font.Bold = True
+    
+    'Create background shading on the titles
+    Range("C3:F3").Select
+    With Selection.Interior
+        .Pattern = xlSolid
+        .PatternColorIndex = xlAutomatic
+        .ThemeColor = xlThemeColorAccent1
+        .TintAndShade = 0.799981688894314
+        .PatternTintAndShade = 0
+    End With
+    
+    'Create background shading on the PHAC percentage
+    Range("C2").Select
+    With Selection.Interior
+        .Pattern = xlSolid
+        .PatternColorIndex = xlAutomatic
+        .ThemeColor = xlThemeColorAccent2
+        .TintAndShade = 0
+        .PatternTintAndShade = 0
+    End With
+    
+    'Create background shading on the totals
+    Range("I13:L13").Select
+        With Selection.Interior
+        .Pattern = xlSolid
+        .PatternColorIndex = xlAutomatic
+        .ThemeColor = xlThemeColorAccent1
+        .TintAndShade = 0.799981688894314
+        .PatternTintAndShade = 0
+    End With
+    
+    'Edit the decimal places for the numbers
+    Range("D4:E1048576").Select
+    Selection.NumberFormat = "0.00"
+    Range("C4:C1048576").Select
+    Selection.NumberFormat = "0.00"
+    
+    'Wrap text
+    Range("C3:F3").Select
+        With Selection
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlBottom
+        .WrapText = True
+        .Orientation = 0
+        .AddIndent = False
+        .IndentLevel = 0
+        .ShrinkToFit = False
+        .ReadingOrder = xlContext
+        .MergeCells = False
+    End With
+    Range("I3:L3").Select
+    With Selection
+        .HorizontalAlignment = xlGeneral
+        .VerticalAlignment = xlBottom
+        .WrapText = True
+        .Orientation = 0
+        .AddIndent = False
+        .IndentLevel = 0
+        .ShrinkToFit = False
+        .ReadingOrder = xlContext
+        .MergeCells = False
+    End With
+    
+    'Write checklist in the appropriate place
+    Range("M3").Select
+    ActiveCell.FormulaR1C1 = "Checklist"
+    
+    
+End Sub
+
+'**************
+'PURPOSE: Creating borders for the worksheet.
+'MODS NEEDED:
+'**************
+
+Sub AddBordersAccounts()
+
+    IsWorksheet ("Accounts")
+
+    'Calculate the last row
+    Dim LastRow As Long
+    LastRow = Cells(rows.count, "A").End(xlUp).Row
+
+    'Adding borders
+    Range("F3:F" & LastRow).Select
+    Selection.Borders(xlDiagonalDown).LineStyle = xlNone
+    Selection.Borders(xlDiagonalUp).LineStyle = xlNone
+    With Selection.Borders(xlEdgeLeft)
+        .LineStyle = xlContinuous
+        .ColorIndex = 0
+        .TintAndShade = 0
+        .Weight = xlThin
+    End With
+    With Selection.Borders(xlEdgeTop)
+        .LineStyle = xlContinuous
+        .ColorIndex = 0
+        .TintAndShade = 0
+        .Weight = xlThin
+    End With
+    With Selection.Borders(xlEdgeBottom)
+        .LineStyle = xlContinuous
+        .ColorIndex = 0
+        .TintAndShade = 0
+        .Weight = xlThin
+    End With
+    With Selection.Borders(xlEdgeRight)
+        .LineStyle = xlContinuous
+        .ColorIndex = 0
+        .TintAndShade = 0
+        .Weight = xlThin
+    End With
+    With Selection.Borders(xlInsideVertical)
+        .LineStyle = xlContinuous
+        .ColorIndex = 0
+        .TintAndShade = 0
+        .Weight = xlThin
+    End With
+    With Selection.Borders(xlInsideHorizontal)
+        .LineStyle = xlContinuous
+        .ColorIndex = 0
+        .TintAndShade = 0
+        .Weight = xlThin
+    End With
+    
+End Sub
+
+'**************
+'PURPOSE: Copies the hours table from Pivot Time Activities worksheet to the Accounts worksheet.
+'MODS NEEDED:
+'**************
+Sub CopyHoursTable()
+
+    Worksheets("Pivot Time Activities").Activate
+    
+    'Select, copy, and paste table
+    Range("G:J").Select
+    Selection.Copy
+    Sheets("Accounts").Select
+    Range("I:L").Select
+    Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks _
+        :=False, Transpose:=False
+    
+End Sub

@@ -1,0 +1,259 @@
+Attribute VB_Name = "GeneralLedger"
+'**************
+'PURPOSE: Calls everything
+'MODS NEEDED: None
+'**************
+
+Sub CleanGL()
+    Call PullDownAccountNames
+    Call DeleteRowsAboveExpenses("MARKETING AND PROMOTION")
+    Call DeleteEmptyRows
+    Call FormatGL
+    Call DetermineExpenseClass
+    Call CreateClassPivot
+End Sub
+
+
+'**************
+'PURPOSE: Copies and pastes the correct account name into the first column of each transaction.
+'         This will allow us to create pivot tables later on.
+'MODS NEEDED: Change the reference to "A5" if the header format changes.
+'**************
+
+Sub PullDownAccountNames()
+
+    'Switches to the General Ledger worksheet
+    Worksheets("General Ledger").Select
+    
+    'Adds name to the top of "Account" column -- so that we can use it as a field in the pivot table
+    Range("A5").Value = "Account"
+    
+    ' Calculate last row
+    Dim LastRow As Integer
+    LastRow = Cells(rows.count, "A").End(xlUp).Row
+    
+    ' Trim the values
+    For i = 2 To LastRow
+        Cells(i, 1).Value = Trim(Cells(i, 1).Value)
+    Next i
+    
+    'Copies and pastes the correct account name into the first column of each transaction
+    For Each area In Columns("A:A").SpecialCells(xlCellTypeBlanks)
+            If area.Cells.Row <= ActiveSheet.UsedRange.rows.count Then
+                area.Cells = Range(area.Address).Offset(-1, 0).Value
+            End If
+    Next area
+    
+
+End Sub
+
+'**************
+'PURPOSE: Deletes any of the transactions that are not expenses or costs (i.e. revenue, sponsorships, etc.)
+'MODS NEEDED: Change "What:=" in the "Set fRg ..." line, if order of expenses changes.
+'             Change the reference to "A6" if that is no longer the first line after header.
+'**************
+
+Sub DeleteRowsAboveExpenses(ByVal expense As String)
+
+    'Delete the split row because it interferes with the rest of the program
+    Range("G:G").Delete
+
+    'Switches to the General Ledger worksheet
+    Worksheets("General Ledger").Select
+
+    'Defining the range to be deleted.
+    'Marketing and Promotion is the first expense, so everything between it and the header will be deleted.
+    Dim fRg As Range
+    Set fRg = Cells.Find(What:=expense, LookAt:=xlWhole)
+     
+    'This does the actual deleting, producing error messages if the sheet is not set up correctly.
+    If Not fRg Is Nothing Then
+        If fRg.Row <> 1 Then
+            Range("A6", fRg.Offset(-1)).EntireRow.Delete
+        End If
+    Else
+       DeleteRowsAboveExpenses ("OFFICE AND ADMINISTRATION COSTS")
+    End If
+
+End Sub
+
+
+'**************
+'PURPOSE: Deletes irrelevant rows in the General Ledger sheet.
+'MODS NEEDED: Change the "C" in Columns("C") if that is no longer the "Date" column.
+'             (All transactions have a type)
+'**************
+
+Sub DeleteEmptyRows()
+    
+    'Switches to the General Ledger worksheet
+    Worksheets("General Ledger").Select
+    
+    Columns("C").SpecialCells(xlBlanks).EntireRow.Delete
+    
+End Sub
+
+'**************
+'PURPOSE: Formats the general ledger sheet.
+'MODS NEEDED: Change the column references if they are no longer correct.
+'**************
+
+Sub FormatGL()
+
+    'Switches to the General Ledger worksheet
+    Worksheets("General Ledger").Select
+
+    'Shorten memo column
+    Range("F:F").ColumnWidth = 50
+    
+    'Add name to the top of the column and make it bold
+    Range("I1").Value = "PHAC class"
+    Range("I1").Select
+    Selection.Font.Bold = True
+    
+    
+End Sub
+
+'**************
+'PURPOSE: Determines the expense class of the item
+'MODS NEEDED: Add another expense class if needed
+'**************
+
+Sub DetermineExpenseClass()
+
+    'Switches to the General Ledger worksheet
+    Worksheets("General Ledger").Select
+    
+    'Calculate the last row
+    Dim LastRow As Long
+    LastRow = Cells(rows.count, "A").End(xlUp).Row
+
+    'Create variables for loop
+    Dim rwIndex As Integer
+    Dim colIndex As Integer
+    Dim count As Integer
+    colIndex = 1
+    
+    'Loop through all the rows in the sheet
+    For rwIndex = 2 To LastRow
+    
+        'Check for all "Personnel" categories, write "Personnel"
+        If Cells(rwIndex, colIndex).Value = "Secondment Fees" Or _
+        Cells(rwIndex, colIndex).Value = "Consulting" Or _
+        Cells(rwIndex, colIndex + 4).Value = "Payroll" Or _
+        Cells(rwIndex, colIndex + 4).Value = "Extended Benefits" Or _
+        Cells(rwIndex, colIndex).Value = "Benefits" Then
+            Cells(rwIndex, colIndex + 8).Value = "Personnel"
+            
+        'Check for all "Travel" categories, write "Travel"
+        ElseIf Cells(rwIndex, colIndex).Value = "Parking & Local Transportation" Or _
+        Cells(rwIndex, colIndex).Value = "TRAVEL" Then
+            Cells(rwIndex, colIndex + 8).Value = "Travel"
+        
+        'Check for all "Meals" categories, write "Meals" (must be grouped in somewhere else)
+        ElseIf Cells(rwIndex, colIndex).Value = "Meals and entertainment" Then
+            Cells(rwIndex, colIndex + 8).Value = "Meals and entertainment"
+        
+        'Check for all "Marketing" categories, write "Marketing"
+        ElseIf Cells(rwIndex, colIndex).Value = "MARKETING AND PROMOTION" Or _
+        Cells(rwIndex, colIndex).Value = "Graphic Design" Or _
+        Cells(rwIndex, colIndex).Value = "Printed Material" Or _
+        Cells(rwIndex, colIndex).Value = "OFFICE & ADMINISTRATION COSTS" Or _
+        Cells(rwIndex, colIndex).Value = "Gifts Expense" Or _
+        Cells(rwIndex, colIndex).Value = "Office Supplies" Or _
+        Cells(rwIndex, colIndex).Value = "Postage/Courier" Or _
+        Cells(rwIndex, colIndex).Value = "Bookkeeping Fees" Or _
+        Cells(rwIndex, colIndex).Value = "Exchange Gain/Loss" Or _
+        Cells(rwIndex, colIndex).Value = "Printing and Copying" Then
+            Cells(rwIndex, colIndex + 8).Value = "Materials"
+        
+        'Check for all "Utilities" categories, write "Utilities"
+        ElseIf Cells(rwIndex, colIndex).Value = "IT" Or _
+        Cells(rwIndex, colIndex).Value = "Telephone/Wireless" Then
+            Cells(rwIndex, colIndex + 8).Value = "Utilities"
+            
+        'Check for all "Other" categories, write "Other"
+        ElseIf Cells(rwIndex, colIndex).Value = "Bank Charges and Fees" Then
+            Cells(rwIndex, colIndex + 8).Value = "Other"
+            
+        'If there is a new expense, it is lumped into a separate category
+        Else
+            Cells(rwIndex, colIndex + 8).Value = "Unclassified - please go back and fix"
+        
+        End If
+        
+    Next rwIndex
+        
+    
+End Sub
+
+'**************
+'PURPOSE: Creates a pivot table with the classes and the sum of their amounts
+'MODS NEEDED: Make sure the columns are correct
+'**************
+
+Sub CreateClassPivot()
+
+    'Switches to the General Ledger worksheet
+    Worksheets("General Ledger").Select
+
+    'Make a pivot table out of columns G and H, which are class and amount
+    Columns("H:I").Select
+    
+    'Make it on the same sheet
+    ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:= _
+        "General Ledger!R1C7:R1048576C9", Version:=6).CreatePivotTable _
+        TableDestination:="'General Ledger'!R4C10", TableName:="PivotTable14", _
+        DefaultVersion:=6
+    Sheets("General Ledger").Select
+    
+    'Place it on cell J4 (can change this)
+    Cells(4, 10).Select
+    With ActiveSheet.PivotTables("PivotTable14")
+        .ColumnGrand = True
+        .HasAutoFormat = True
+        .DisplayErrorString = False
+        .DisplayNullString = True
+        .EnableDrilldown = True
+        .ErrorString = ""
+        .MergeLabels = False
+        .NullString = ""
+        .PageFieldOrder = 2
+        .PageFieldWrapCount = 0
+        .PreserveFormatting = True
+        .RowGrand = True
+        .SaveData = True
+        .PrintTitles = False
+        .RepeatItemsOnEachPrintedPage = True
+        .TotalsAnnotation = False
+        .CompactRowIndent = 1
+        .InGridDropZones = False
+        .DisplayFieldCaptions = True
+        .DisplayMemberPropertyTooltips = False
+        .DisplayContextTooltips = True
+        .ShowDrillIndicators = True
+        .PrintDrillIndicators = False
+        .AllowMultipleFilters = False
+        .SortUsingCustomLists = True
+        .FieldListSortAscending = False
+        .ShowValuesRow = False
+        .CalculatedMembersInFilters = False
+        .RowAxisLayout xlCompactRow
+    End With
+    With ActiveSheet.PivotTables("PivotTable14").PivotCache
+        .RefreshOnFileOpen = False
+        .MissingItemsLimit = xlMissingItemsDefault
+    End With
+    
+    'Enable fields "class" and "sum of amount"
+    ActiveSheet.PivotTables("PivotTable14").RepeatAllLabels xlRepeatLabels
+    ActiveSheet.PivotTables("PivotTable14").AddDataField ActiveSheet.PivotTables( _
+        "PivotTable14").PivotFields("Amount"), "Sum of Amount", xlSum
+    With ActiveSheet.PivotTables("PivotTable14").PivotFields("PHAC class")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+    ActiveWorkbook.ShowPivotTableFieldList = False
+
+End Sub
+
